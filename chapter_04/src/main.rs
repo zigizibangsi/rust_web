@@ -29,6 +29,7 @@ struct Answer {
     question_id: QuestionId,
 }
 
+#[derive(Clone)]
 struct Store {
     questions: Arc<RwLock<HashMap<QuestionId, Question>>>,
     answers: Arc<RwLock<HashMap<AnswerId, Answer>>>,
@@ -128,6 +129,7 @@ impl std::fmt::Display for Error {
 }
 
 impl Reject for Error {}
+
 async fn return_error(r: Rejection) -> Result<impl Reply, Rejection> {
     if let Some(error) = r.find::<Error>() {
         Ok(warp::reply::with_status(
@@ -142,6 +144,11 @@ async fn return_error(r: Rejection) -> Result<impl Reply, Rejection> {
     } else if let Some(error) = r.find::<BodyDeserializeError>() {
         Ok(warp::reply::with_status(
             error.to_string(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ))
+    } else if let Some(InvalidId) = r.find() {
+        Ok(warp::reply::with_status(
+            "No valid ID presented".to_string(),
             StatusCode::UNPROCESSABLE_ENTITY,
         ))
     } else {
@@ -187,7 +194,7 @@ async fn add_answer(
         .await
         .insert(answer.id.clone(), answer);
 
-    Ok(warp::reply::with_status("Anser added", StatusCode::OK))
+    Ok(warp::reply::with_status("Answer added", StatusCode::OK))
 }
 
 #[tokio::main]
@@ -242,5 +249,6 @@ async fn main() {
         .or(add_answer)
         .with(cors)
         .recover(return_error);
+
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }
