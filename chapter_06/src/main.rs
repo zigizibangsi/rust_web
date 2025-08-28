@@ -33,7 +33,7 @@ async fn main() {
     */
 
     let log_filter = std::env::var("RUST_LOG")
-        .unwrap_or_else(|_| "practical_rust_book=info, warp=error".to_owned()); // 1단계 : 로그 수준을 추가한다.
+        .unwrap_or_else(|_| "practical_rust_book=info,warp=error".to_owned()); // 1단계 : 로그 수준을 추가한다.
 
     let store = store::Store::new();
     let store_filter = warp::any().map(move || store.clone());
