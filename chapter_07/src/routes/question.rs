@@ -4,9 +4,7 @@ use warp::http::StatusCode;
 
 use crate::store::Store;
 use crate::types::pagination::{Pagination, extract_pagination};
-use crate::types::question::{Question, QuestionId};
-
-use handle_errors::Error;
+use crate::types::question::{NewQuestion, Question};
 
 #[instrument]
 pub async fn get_questions(
@@ -18,50 +16,45 @@ pub async fn get_questions(
 
     if !params.is_empty() {
         event!(Level::INFO, pagination = true);
-        let pagination = extract_pagination(params)?; // 페이지 매기기 객체(pagination object)가 비어있지 않은 경우, 위 가변 변수의 값을 클라이언트가 전달한 Pagination 값으로 대체한다.
+        pagination = extract_pagination(params)?; // 페이지 매기기 객체(pagination object)가 비어있지 않은 경우, 위 가변 변수의 값을 클라이언트가 전달한 Pagination 값으로 대체한다.
     }
     info!(pagination = false);
-    let res: Vec<Question> = match store
+    match store
         .get_questions(pagination.limit, pagination.offset)
         .await
     {
-        Ok(res) => res,
-        Err(e) => {
-            return Err(warp::reject::custom(Error::DatabaseQueryError(e))); // 에러의 경우, handle-errors 크레이트에서 정의한 에러 값을 에러 핸들러에 넘긴다.
-        }
-    };
-
-    Ok(warp::reply::json(&res))
+        Ok(res) => Ok(warp::reply::json(&res)),
+        Err(e) => Err(warp::reject::custom(e)),
+    }
 }
 
 pub async fn add_question(
     store: Store,
     new_question: NewQuestion,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-    if let Err(e) = store.add_question(new_question).await {
-        return Err(warp::reject::custom(Error::DatabaseQueryError(e)));
+    match store.add_question(new_question).await {
+        Ok(_) => Ok(warp::reply::with_status("Question added", StatusCode::OK)),
+        Err(e) => Err(warp::reject::custom(e)),
     }
-    Ok(warp::reply::with_status("Question added", StatusCode::OK))
 }
 
 pub async fn update_question(
-    id: String,
+    id: i32,
     store: Store,
     question: Question,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-    match store.questions.write().await.get_mut(&QuestionId(id)) {
-        Some(q) => *q = question,
-        None => return Err(warp::reject::custom(Error::QuestionNotFound)),
+    match store.update_question(question, id).await {
+        Ok(res) => Ok(warp::reply::json(&res)),
+        Err(e) => Err(warp::reject::custom(e)),
     }
-    Ok(warp::reply::with_status("Question updated", StatusCode::OK))
 }
 
-pub async fn delete_question(
-    id: String,
-    store: Store,
-) -> Result<impl warp::Reply, warp::Rejection> {
-    match store.questions.write().await.remove(&QuestionId(id)) {
-        Some(_) => return Ok(warp::reply::with_status("Question deleted", StatusCode::OK)),
-        None => return Err(warp::reject::custom(Error::QuestionNotFound)),
+pub async fn delete_question(id: i32, store: Store) -> Result<impl warp::Reply, warp::Rejection> {
+    match store.delete_question(id).await {
+        Ok(_) => Ok(warp::reply::with_status(
+            format!("Question {} deleted", id),
+            StatusCode::OK,
+        )),
+        Err(e) => Err(warp::reject::custom(e)),
     }
 }

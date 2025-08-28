@@ -5,8 +5,8 @@ use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
 use handle_errors::Error;
 
 use crate::types::{
-    answer::{Answer, AnswerId},
-    question::{Question, QuestionId},
+    answer::{Answer, AnswerId, NewAnswer},
+    question::{NewQuestion, Question, QuestionId},
 };
 
 #[derive(Debug, Clone)]
@@ -34,7 +34,7 @@ impl Store {
         &self,
         limit: Option<u32>,
         offset: u32,
-    ) -> Result<Vec<Question>, sqlx::Error> {
+    ) -> Result<Vec<Question>, Error> {
         // limit, offset 매개변수를 함수에 전달하여 클라이언트가 페이지 매기기를 원하는지 알려주고 성공했을 때는 질문의 벡터를 반환 받고, 실패했을 때는 에러 타입을 반환 받는다.
         match sqlx::query("SELECT * from questions LIMIT $1 OFFSET $2") // 쿼리 함수를 써서 일반 SQL 문을 작성해 넣었고 쿼리에 전달할 변수에 달러 기호($)와 숫자를 추가한다.
             .bind(limit) // bind 메서드는 SQL 문의 $+숫자 부분을 여기에 지정된 변수로 대체한다.
@@ -52,12 +52,12 @@ impl Store {
             Ok(questions) => Ok(questions),
             Err(e) => {
                 tracing::event!(tracing::Level::ERROR, "{:?}", e);
-                Err(e)
+                Err(Error::DatabaseQueryError)
             }
         }
     }
 
-    pub async fn add_question(&self, new_question: NewQuestion) -> Result<Question, sqlx::Error> {
+    pub async fn add_question(&self, new_question: NewQuestion) -> Result<Question, Error> {
         match sqlx::query(
             "INSERT INTO questions (title, content, tags)
             VALUES ($1, $2, $3)
@@ -76,7 +76,10 @@ impl Store {
         .await
         {
             Ok(question) => Ok(question),
-            Err(e) => Err(e),
+            Err(e) => {
+                tracing::event!(tracing::Level::ERROR, "{:?}", e);
+                Err(Error::DatabaseQueryError)
+            }
         }
     }
 
@@ -84,7 +87,7 @@ impl Store {
         &self,
         question: Question,
         question_id: i32,
-    ) -> Result<Question, sqlx::Error> {
+    ) -> Result<Question, Error> {
         match sqlx::query(
             "UPDATE questions
             SET title = $1, content = $2, tags = $3
@@ -105,7 +108,48 @@ impl Store {
         .await
         {
             Ok(question) => Ok(question),
-            Err(e) => Err(e),
+            Err(e) => {
+                tracing::event!(tracing::Level::ERROR, "{:?}", e);
+                Err(Error::DatabaseQueryError)
+            }
+        }
+    }
+
+    pub async fn delete_question(&self, question_id: i32) -> Result<bool, Error> {
+        match sqlx::query("DELETE FROM questions WHERE id = $1")
+            .bind(question_id)
+            .execute(&self.connection)
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(e) => {
+                tracing::event!(tracing::Level::ERROR, "{:?}", e);
+                Err(Error::DatabaseQueryError)
+            }
+        }
+    }
+
+    pub async fn add_answer(&self, new_answer: NewAnswer) -> Result<Answer, Error> {
+        match sqlx::query(
+            "INSERT INTO answers (content, question_id)
+            VALUES ($1, $2)
+            ",
+        )
+        .bind(new_answer.content)
+        .bind(new_answer.question_id.0)
+        .map(|row: PgRow| Answer {
+            id: AnswerId(row.get("id")),
+            content: row.get("content"),
+            question_id: QuestionId(row.get("corresponding_question")),
+        })
+        .fetch_one(&self.connection)
+        .await
+        {
+            Ok(answer) => Ok(answer),
+            Err(e) => {
+                tracing::event!(tracing::Level::ERROR, "{:?}", e);
+                Err(Error::DatabaseQueryError)
+            }
         }
     }
 }
